@@ -41,6 +41,7 @@ class ChatService (
 
     fun sendMessage(userId: String, message: String): ChatMessage {
         if (!chatRepository.existsByUserId(userId)) {
+            // mongoDB 조회 후 이전 대화 내용이 없다면 thread 생성
             val chatHistory = ChatHistory(
                 userId = userId,
                 threadId = createThread(),
