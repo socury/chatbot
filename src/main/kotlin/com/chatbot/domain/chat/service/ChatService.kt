@@ -107,7 +107,7 @@ class ChatService (
                     textMap?.get("value") as? String
                 }
 
-                if (role == "user" && value != null) {
+                if (role == "user" || value != null) {
                     sleep(1000) // 제일 처음 메시자가 user이면 기다렸다가 다시 요청 보내기
                 } else {
                     val assistantMessage = ChatMessage(
