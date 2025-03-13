@@ -55,9 +55,9 @@ class ChatService (
         chatHistory.messages.add(userMessage)
 
         createMessage(threadId, message)
-        runAssistant(threadId)
-        sleep(3000)
-        return getMessage(chatHistory, threadId)
+        val runId = runAssistant(threadId)
+        sleep(1000)
+        return getStatus(threadId, runId, chatHistory)
     }
 
     // thread 발급
@@ -79,49 +79,66 @@ class ChatService (
     }
 
     // assistant 실행하기
-    fun runAssistant(threadId: String) {
+    fun runAssistant(threadId: String): String {
         val requestBody = mapOf(
             "assistant_id" to assistantId,
         )
         val entity = HttpEntity(requestBody,headers)
-        restTemplate.exchange("$apiUrl/$threadId/runs", HttpMethod.POST, entity, String::class.java)
+        val response = restTemplate.exchange("$apiUrl/$threadId/runs", HttpMethod.POST, entity, String::class.java)
+        val objectMapper = ObjectMapper()
+        val jsonNode: JsonNode = objectMapper.readTree(response.body)
+        val id = jsonNode["id"]?.asText() ?: ""
+        return id
+    }
+
+    fun getStatus(threadId: String, runId: String, chatHistory: ChatHistory): ChatMessage {
+        while (true) {
+            try {
+                val entity = HttpEntity<String>(headers)
+                val response = restTemplate.exchange("$apiUrl/$threadId/runs/$runId", HttpMethod.GET, entity, String::class.java)
+                val objectMapper = ObjectMapper()
+                val jsonNode: JsonNode = objectMapper.readTree(response.body)
+                val status = jsonNode["status"]?.asText() ?: ""
+
+                if (status != "completed") {
+                    log.warn("i")
+                    sleep(500)
+                } else {
+                    return getMessage(chatHistory, threadId)
+                }
+            } catch (e: Exception) {
+                log.error(e.message, e)
+                throw CustomException(ChatErrorCode.GET_CHAT_ERROR)
+            }
+        }
     }
 
     // 메시지 가져오기
     fun getMessage(chatHistory: ChatHistory, threadId: String): ChatMessage{
-        while (true) {
-            try {
-                val entity = HttpEntity<String>(headers)
-                val response =
-                    restTemplate.exchange("$apiUrl/$threadId/messages", HttpMethod.GET, entity, String::class.java)
-                val responseBody = objectMapper.readValue<Map<String, Any>>(response.body!!)
 
-                val data = responseBody["data"] as? List<Map<String, Any>>
-                val firstMessage = data?.firstOrNull()
+        val entity = HttpEntity<String>(headers)
+        val response =
+            restTemplate.exchange("$apiUrl/$threadId/messages", HttpMethod.GET, entity, String::class.java)
+        val responseBody = objectMapper.readValue<Map<String, Any>>(response.body!!)
 
-                val role = firstMessage?.get("role") as? String ?: ""
-                val contentList = firstMessage?.get("content") as? List<Map<String, Any>>
+        val data = responseBody["data"] as? List<Map<String, Any>>
+        val firstMessage = data?.firstOrNull()
 
-                val value = contentList?.firstOrNull()?.let { contentItem ->
-                    val textMap = contentItem["text"] as? Map<String, Any>
-                    textMap?.get("value") as? String
-                }
+        val role = firstMessage?.get("role") as? String ?: ""
+        val contentList = firstMessage?.get("content") as? List<Map<String, Any>>
 
-                if (role == "user" || value != null) {
-                    sleep(1000) // 제일 처음 메시자가 user이면 기다렸다가 다시 요청 보내기
-                } else {
-                    val assistantMessage = ChatMessage(
-                        content = value.toString(),
-                        role = "assistant"
-                    )
-                    chatHistory.messages.add(assistantMessage)
-                    chatRepository.save(chatHistory)
-                    return assistantMessage
-                }
-            } catch (e: Exception) {
-                throw CustomException(ChatErrorCode.GET_CHAT_ERROR)
-            }
+        val value = contentList?.firstOrNull()?.let { contentItem ->
+            val textMap = contentItem["text"] as? Map<String, Any>
+            textMap?.get("value") as? String
         }
+
+        val assistantMessage = ChatMessage(
+            content = value.toString(),
+            role = "assistant"
+        )
+        chatHistory.messages.add(assistantMessage)
+        chatRepository.save(chatHistory)
+        return assistantMessage
     }
 
 
